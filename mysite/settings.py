@@ -15,6 +15,8 @@ import os
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# pomocnicza funkcja do parsowania zmiennych srodowiskowych
+# dzieli napis po przecinkach, usuwa spacje i odrzuca puste elementy
 def env_list(name, default=""):
     return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
 
@@ -128,7 +130,7 @@ TIME_ZONE = 'Europe/Warsaw'
 
 USE_I18N = True
 
-# USE_L10N = True (nie ma juz w Django 5.2)
+USE_L10N = True # (nie ma juz w Django 5.2)
 
 USE_TZ = True
 
