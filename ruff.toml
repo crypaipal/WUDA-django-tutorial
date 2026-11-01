@@ -1,0 +1,5 @@
+line-length = 120
+exclude = ["polls/migrations"]
+
+[lint]
+select = ["E", "F", "W"]

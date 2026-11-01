@@ -1,0 +1,38 @@
+# Start: docker compose up -d
+# Stop: docker compose down
+
+services:
+  # bd PostgreSQL (zamiast deweloperskiego SQLite)
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: polls
+      POSTGRES_USER: polls
+      POSTGRES_PASSWORD: polls
+    # dane bazy przetrwaja restart / usuniecie kontenera
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # kontener jest "healthy" dopiero, gdy baza przyjmuje polaczenia
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U polls"]
+      interval: 5s
+      retries: 10
+
+  # aplikacja Django
+  web:
+    # obraz z GitHub Container Registry (zbudowany przez potok CI/CD)
+    # "docker compose pull web" pobiera go z rejestru,
+    # "docker compose up --build" buduje go lokalnie z Dockerfile (build: .)
+    image: ghcr.io/crypaipal/wuda-django-tutorial:latest
+    build: .
+    # konfiguracja aplikacji z pliku .env, ktory nie trafia do repo
+    env_file: .env
+    ports:
+      - "8000:8000"
+    # aplikacja startuje dopiero, gdy baza jest gotowa
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
