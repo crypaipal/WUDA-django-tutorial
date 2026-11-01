@@ -1,0 +1,153 @@
+# lint -> testy -> budowa obrazu + smoke test -> publikacja do GHCR
+# kazdy job startuje dopiero, gdy poprzedni zakonczy sie sukcesem (needs)
+
+name: CI/CD
+
+# kiedy potok sie uruchamia:
+# - push na master lub tag v* (np. v1.0.0) -> pelny potok z publikacja obrazu
+# - Pull Request do master -> tylko sprawdzenie (bez publikacji obrazu)
+# - workflow_dispatch -> reczne uruchomienie z zakladki Actions
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  # 1. lint: statyczna analiza kodu (styl, nieuzywane importy, bledy skladni)
+  #    konfiguracja regul jest w pliku ruff.toml
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+
+  # 2. testy jednostkowe Django na prawdziwej bazie PostgreSQL, a nie na SQLite
+  test:
+    name: Testy
+    runs-on: ubuntu-latest
+    needs: lint
+    # kontener z PostgreSQL uruchamiany obok joba na czas testow
+    # health-cmd sprawia, ze kroki ruszaja dopiero, gdy baza jest gotowa
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: polls
+          POSTGRES_USER: polls
+          POSTGRES_PASSWORD: polls
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U polls"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    # zmienne srodowiskowe czytane przez settings.py
+    # POSTGRES_DB przelacza Django z SQLite na PostgreSQL
+    env:
+      DJANGO_SECRET_KEY: ci-secret
+      POSTGRES_DB: polls
+      POSTGRES_USER: polls
+      POSTGRES_PASSWORD: polls
+      POSTGRES_HOST: localhost
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      # blad, jesli ktos zmienil models.py i zapomnial wygenerowac migracji
+      - name: Check to see if any migrations are missing
+        run: python manage.py makemigrations --check --dry-run
+      - run: python manage.py test
+
+  # 3. budowa obrazu Docker, sprawdzenie czy aplikacja w nim wstaje (smoke test)
+  #    i publikacja do GitHub Container Registry (ghcr.io)
+  docker:
+    name: Build, smoke test and publish image
+    runs-on: ubuntu-latest
+    needs: test
+    # GITHUB_TOKEN dostaje prawo zapisu do rejestru paczek (GHCR)
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      # Buildx = rozszerzony builder Dockera (obsluguje cache miedzy uruchomieniami)
+      - uses: docker/setup-buildx-action@v3
+
+      # budujemy obraz lokalnie na runnerze (load: true), jeszcze bez wysylania
+      # cache-to/cache-from trzyma warstwy w cache GitHub Actions,
+      # dzieki czemu kolejne budowy sa szybsze
+      - name: Build image for test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: polls:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # smoke test: uruchamiamy zbudowany obraz razem z PostgreSQL w jednej sieci,
+      # robimy migracje i sprawdzamy czy /polls/ odpowiada
+      # (curl --fail = blad przy kodzie >= 400)
+      # do rejestru trafia tylko obraz, ktory faktycznie dziala
+      - name: Smoke test (image + PostgreSQL)
+        run: |
+          docker network create ci
+          docker run -d --name db --network ci \
+            -e POSTGRES_DB=polls -e POSTGRES_USER=polls -e POSTGRES_PASSWORD=polls \
+            postgres:16
+          timeout 60 bash -c 'until docker exec db pg_isready -h 127.0.0.1 -U polls; do sleep 1; done'
+          docker run -d --name web --network ci -p 8000:8000 --env-file .env-example polls:ci
+          docker exec web python manage.py migrate --noinput
+          curl --fail --retry 10 --retry-connrefused --retry-delay 2 http://localhost:8000/polls/
+
+      # gdy cos sie nie uda, wypisujemy logi aplikacji
+      - name: Application logs on error
+        if: failure()
+        run: docker logs web || true
+
+      # logowanie do GHCR wbudowanym tokenem GITHUB_TOKEN (nie trzeba tworzyc sekretow)
+      # pomijane na Pull Requestach
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # generowanie nazwy i tagow obrazu:
+      # - sha-xxxxxxx -> dokladnie wiadomo, z ktorego commita jest obraz
+      # - master      -> ostatnia wersja z galezi master
+      # - 1.0.0       -> przy tagu v1.0.0
+      # - latest      -> tylko dla domyslnej galezi
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # wysylka obrazu do GHCR
+      - name: Publish to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
