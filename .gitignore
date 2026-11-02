@@ -8,3 +8,6 @@ db.sqlite3
 .env.local
 staticfiles/
 .ruff_cache/
+
+django-app/charts/
+*.tgz
