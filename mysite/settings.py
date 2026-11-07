@@ -136,8 +136,6 @@ TIME_ZONE = 'Europe/Warsaw'
 
 USE_I18N = True
 
-USE_L10N = True # (nie ma juz w Django 5.2)
-
 USE_TZ = True
 
 
