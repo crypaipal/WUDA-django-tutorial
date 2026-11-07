@@ -100,21 +100,53 @@ flowchart LR
 | `image.repository`, `image.tag` | który obraz aplikacji wdrożyć       |
 | `replicaCount`                  | liczba kopii aplikacji              |
 | `django.secretKey`              | tajny klucz Django                  |
+| `django.allowedHosts` | autoryzowane domeny (np. `django.local`)      | 
 | `postgresql.auth.*`             | nazwa bazy, użytkownik i hasło      |
 | `ingress.*`                     | adres aplikacji i kontroler Ingress |
 
 ### Wdrożenie
 
-Wymagane: klaster Kubernetes (np. Minikube lub K3s) z kontrolerem Ingress NGINX oraz `kubectl` i `helm`.
+**Wymagania:** Klaster Kubernetes (np. Minikube) oraz zainstalowane `kubectl` i `helm`. Jeśli używasz systemu Windows, dodaj wpis `127.0.0.1 django.local` w pliku `C:\Windows\System32\drivers\etc\hosts`.
+1. **Przygotowanie klastra (włączenie routera):**
 
-```bash
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm dependency build ./django-app
-helm install polls ./django-app
-kubectl exec deploy/polls-django-app -- python manage.py migrate
-kubectl exec -it deploy/polls-django-app -- python manage.py createsuperuser
-```
+   ```
+   minikube addons enable ingress
+   
+   ```
 
-Następnie w pliku `hosts` dodaj wpis `<IP klastra> django.local` i otwórz http://django.local/polls/.
+2. **Pobranie zależności i instalacja aplikacji:**
 
+   ```
+   helm repo add bitnami https://charts.bitnami.com/bitnami
+   helm dependency build ./django-app
+   helm install polls ./django-app
+   
+   ```
+
+3. **Oczekiwanie na gotowość kontenerów:**
+   Poczekaj, aż wszystkie pody osiągną status `Running` 1/1 (wyjdź skrótem `Ctrl+C`):
+
+   ```
+   kubectl get pods -w
+   
+   ```
+
+4. **Wykonanie migracji i utworzenie admina (gdy pody już działają):**
+
+   ```
+   kubectl exec deploy/polls-django-app -- python manage.py migrate
+   kubectl exec -it deploy/polls-django-app -- python manage.py createsuperuser
+   
+   ```
+
+5. **Dostęp do aplikacji:**
+   Otwórz **nowe okno terminala** i uruchom tunel sieciowy (zostaw go działającego w tle):
+
+   ```
+   minikube tunnel
+   
+   ```
+
+   Aplikacja jest teraz dostępna w przeglądarce pod adresem: <http://django.local>
+   
 Wdrożenie nowej wersji: `helm upgrade polls ./django-app --set image.tag=sha-xxxxxxx`, powrót do poprzedniej: `helm rollback polls`.
