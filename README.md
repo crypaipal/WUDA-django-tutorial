@@ -124,14 +124,14 @@ flowchart LR
    ```
 
 3. **Oczekiwanie na gotowość kontenerów:**
-   Poczekaj, aż wszystkie pody osiągną status `Running` 1/1 (wyjdź skrótem `Ctrl+C`):
+   Poczekaj, aż wszystkie pody osiągną status `Running` 1/1 :
 
    ```
    kubectl get pods -w
    
    ```
 
-4. **Wykonanie migracji i utworzenie admina (gdy pody już działają):**
+4. **Wykonanie migracji i utworzenie admina):**
 
    ```
    kubectl exec deploy/polls-django-app -- python manage.py migrate
