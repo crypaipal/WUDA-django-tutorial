@@ -79,6 +79,12 @@ Bez Dockera (tryb deweloperski z SQLite): plik `.env.local` z `DJANGO_SECRET_KEY
 ## Etap 2 – Kubernetes i Helm
 
 Kubernetes uruchamia kontenery na klastrze maszyn, pilnuje, żeby działały, i kieruje do nich ruch. Helm to „instalator” dla Kubernetesa: chart w katalogu `django-app/` to szablon, który jednym poleceniem tworzy wszystkie potrzebne elementy.
+### Podział środowisk: Serwer (Linux) i Klient (Windows)
+
+* **Serwer (Linux):** Klaster Minikube, baza danych oraz Pod z aplikacją Django działają w odizolowanym, linuksowym środowisku (przez WSL2).
+* **Klient (Windows):** Przeglądarka internetowa działa natywnie na fizycznym systemie Windows.
+
+Mostem między tymi systemami jest proces `minikube tunnel`, który przechwytuje żądania z przeglądarki na Windowsie i przekazuje je do NGINX Ingress Controllera wewnątrz linuksowego klastra.
 
 ```mermaid
 flowchart LR
